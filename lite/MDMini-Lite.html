@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="vi"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MDMini Lite · Sổ Markdown</title>
+<style>
+*{box-sizing:border-box}body{margin:0;color:#213632;background:#f6f5ef;font:16px/1.6 system-ui,sans-serif}header,nav,footer{padding:12px clamp(16px,4vw,60px);display:flex;align-items:center;gap:8px;flex-wrap:wrap}header{background:#123d36;color:white;justify-content:space-between}h1{margin:0;font:600 23px Georgia,serif}button{font:inherit;font-size:14px;border:1px solid #a7b8ae;background:#fff;color:#174038;border-radius:6px;padding:6px 12px;cursor:pointer}button:hover,button[aria-pressed=true]{background:#d9eae1}button:focus-visible,textarea:focus-visible{outline:3px solid #ba803d}nav{border-bottom:1px solid #cbd5ca}main{display:flex;height:calc(100vh - 200px);min-height:310px;margin:16px clamp(12px,4vw,60px);background:white;border:1px solid #cad4cd;border-radius:8px;overflow:hidden}section{min-width:0;flex:1;display:flex;flex-direction:column}section+section{border-left:1px solid #cad4cd}h2.label{font:600 12px system-ui;letter-spacing:.08em;text-transform:uppercase;background:#edf2ed;color:#38554a;margin:0;padding:10px 16px}textarea,article{padding:16px clamp(14px,2.5vw,40px);margin:0;flex:1;overflow:auto}textarea{resize:none;border:0;font:14px/1.65 ui-monospace,monospace}article{font:17px/1.65 Georgia,serif;overflow-wrap:anywhere}article :first-child{margin-top:0}pre,code{background:#eff3ef}pre{padding:14px;overflow:auto}blockquote{margin-left:0;border-left:3px solid #5b8e75;padding-left:14px}footer{font-size:13px}details{margin:0 clamp(16px,4vw,60px) 20px}output{white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer}[hidden]{display:none!important}@media(max-width:650px){main{flex-direction:column;height:65vh}section{min-height:0}section+section{border-left:0;border-top:1px solid #cad4cd}}
+</style>
+<header><h1>MDMini Lite</h1><span id="name">Ghi-chu.md</span></header>
+<nav aria-label="Tài liệu"><button id="open">Mở tệp…</button><input hidden id="file" type="file" accept=".md,.markdown,.txt,.m27"><button id="save">Lưu .md</button><button id="pack">Xuất .m27</button><button data-mode="source">Soạn</button><button data-mode="both" aria-pressed="true">Song song</button><button data-mode="preview">Đọc</button></nav>
+<main><section id="source"><h2 class="label"><label for="editor">Markdown</label></h2><textarea id="editor" spellcheck="false"></textarea></section><section id="preview"><h2 class="label">Bản đọc</h2><article id="paper"></article></section></main>
+<footer><span id="stats"></span><span role="status" id="notice"></span></footer>
+<details id="inspect"><summary>Kiểm tra CVNSS4.0 · Base27 · trit</summary><p>Chọn một âm tiết trong trình soạn để tra bảng 27 mục. Ba trit cân bằng biểu diễn chỉ số trừ 13.</p><output id="mapping"></output></details>
+<script id="codec">
+const words='của và những các một trong được với người cho có tiếng Việt công nghệ dữ liệu học máy hệ thống phần mềm văn bản này là'.split(' ');
+const cvss='cuaz val nhugw cac motf trogp dush voix wujk cho coj tizb Vidf cogy wef zuw liwf hocr mayj hef thogb fand memd vano banz nayl lal'.split(' ');
+const ids=new Map(words.map((word,i)=>[word,i]));
+const utf8=new TextEncoder(), reader=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true});
+function checksum(bytes){
+  let hash=2166136261;
+  for(const b of bytes) hash=Math.imul(hash^b,16777619);
+  return hash>>>0;
+}
+function encode(text){
+  const raw=utf8.encode(text), packed=[];
+  let end=0,group=[];
+  function literal(s){for(const b of utf8.encode(s)) packed.push(b)}
+  function flush(){
+    if(!group.length)return;
+    const offset=[0,0,27,756][group.length];
+    const value=group.reduce((n,id)=>27*n+id,0)+offset;
+    packed.push(255,value>>8,value&255);group=[];
+  }
+  for(const hit of text.matchAll(/[\p{L}\p{M}\p{N}_]+/gu)){
+    const id=ids.get(hit[0]);
+    if(id===undefined)continue;
+    const gap=text.slice(end,hit.index);
+    if(!group.length||gap!==' '){flush();literal(gap)}
+    group.push(id);end=hit.index+hit[0].length;
+    if(group.length===3)flush();
+  }
+  flush();literal(text.slice(end));
+  const compressed=packed.length<raw.length, payload=compressed?packed:raw;
+  const file=new Uint8Array(9+payload.length);
+  file.set([77,50,55,1,Number(compressed)]);
+  new DataView(file.buffer).setUint32(5,checksum(raw));
+  file.set(payload,9);return file;
+}
+function decode(file){
+  function fail(){throw Error('Tệp M27 hỏng hoặc phiên bản chưa được hỗ trợ.')}
+  if(file.length<9||file[0]!==77||file[1]!==50||file[2]!==55||file[3]!==1||file[4]>1)fail();
+  const parts=[];let start=9;
+  if(file[4])for(let i=9;i<file.length;i++){
+    if(file[i]!==255)continue;
+    parts.push(reader.decode(file.subarray(start,i)));
+    if(i+2>=file.length)fail();
+    let n=file[++i]*256+file[++i];
+    if(n>=20439)fail();
+    const count=n<27?1:n<756?2:3;
+    n-=[0,0,27,756][count];
+    const tokens=Array(count);
+    for(let j=count-1;j>=0;j--){tokens[j]=words[n%27];n=Math.floor(n/27)}
+    parts.push(tokens.join(' '));start=i+1;
+  }
+  parts.push(reader.decode(file.subarray(start)));
+  const value=parts.join('');
+  if(checksum(utf8.encode(value))!==new DataView(file.buffer,file.byteOffset).getUint32(5))fail();
+  return value;
+}
+</script>
+<script>
+const el=id=>document.getElementById(id), editor=el('editor');
+let original='# Sổ Markdown\n\nGhi lại ý tưởng của bạn.\n\n## Ví dụ\n\n- công nghệ dữ liệu\n- hệ thống phần mềm\n',dirty=false,timer;
+editor.value=original;
+const current=()=>original===null?editor.value:original;
+function render(){
+  const fragment=document.createDocumentFragment();
+  let paragraph=[],list=null,code=null;
+  function node(tag,s,parent=fragment){const n=document.createElement(tag);n.textContent=s;parent.append(n);return n}
+  function inline(n,s){
+    for(const part of s.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)){
+      if(part.startsWith('**')&&part.endsWith('**')&&part.length>4)node('strong',part.slice(2,-2),n);
+      else if(part.length>2&&part.startsWith('`')&&part.endsWith('`'))node('code',part.slice(1,-1),n);
+      else n.append(part);
+    }
+  }
+  function flush(){if(paragraph.length){inline(node('p',''),paragraph.join(' '));paragraph=[]}}
+  for(const line of editor.value.split('\n')){
+    if(code){if(/^```\s*$/.test(line))code=null;else code.append(line+'\n');continue}
+    if(line.startsWith('```')){flush();list=null;code=node('code','',node('pre',''));continue}
+    const item=line.match(/^([-*]|\d+\.)\s+(.*)/);
+    if(item){flush();const tag=/\d/.test(item[1])?'ol':'ul';if(list?.localName!==tag)list=node(tag,'');inline(node('li','',list),item[2]);continue}
+    list=null;
+    const title=line.match(/^(#{1,6})\s+(.*)/);
+    if(title){flush();inline(node('h'+title[1].length,''),title[2])}
+    else if(line.startsWith('> ')){flush();inline(node('blockquote',''),line.slice(2))}
+    else if(!line.trim())flush();else paragraph.push(line);
+  }
+  flush();el('paper').replaceChildren(fragment);
+  el('stats').textContent=utf8.encode(current()).length.toLocaleString('vi')+' byte UTF-8';
+}
+function inspect(){
+  const word=editor.value.slice(editor.selectionStart,editor.selectionEnd).trim(),id=ids.get(word);
+  el('mapping').textContent=id===undefined?'Chưa chọn âm tiết thuộc bảng.':word+' → '+cvss[id]+' → '+id+' → ('+[9,3,1].map(p=>Math.floor(id/p)%3-1).join(', ')+')';
+}
+editor.onselect=inspect;el('inspect').ontoggle=inspect;
+editor.oninput=()=>{original=null;dirty=true;el('notice').textContent='Đã chỉnh sửa';clearTimeout(timer);timer=setTimeout(render,120)};
+for(const b of document.querySelectorAll('[data-mode]'))b.onclick=()=>{
+  el('source').hidden=b.dataset.mode==='preview';el('preview').hidden=b.dataset.mode==='source';
+  for(const other of document.querySelectorAll('[data-mode]'))other.setAttribute('aria-pressed',String(other===b));
+};
+el('open').onclick=()=>el('file').click();
+el('file').onchange=async e=>{
+  const file=e.target.files[0];e.target.value='';
+  if(!file||dirty&&!confirm('Thay bản đang soạn bằng tệp mới?'))return;
+  try{
+    const bytes=new Uint8Array(await file.arrayBuffer());
+    original=/\.m27$/i.test(file.name)?decode(bytes):reader.decode(bytes);
+    editor.value=original;el('name').textContent=file.name.replace(/\.m27$/i,'.md');
+    dirty=false;render();el('notice').textContent='Đã mở tệp.';
+  }catch(err){el('notice').textContent='Không mở được tệp. '+err.message}
+};
+function download(compact){
+  const bytes=compact?encode(current()):utf8.encode(current());
+  const url=URL.createObjectURL(new Blob([bytes])),a=document.createElement('a');
+  a.href=url;a.download=el('name').textContent.replace(/\.(md|markdown|txt)$/i,'')+(compact?'.m27':'.md');a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),30000);dirty=false;
+  el('notice').textContent='Đã yêu cầu tải '+bytes.length+' byte.';
+}
+el('save').onclick=()=>download(false);el('pack').onclick=()=>download(true);
+addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
+render();
+</script></html>
